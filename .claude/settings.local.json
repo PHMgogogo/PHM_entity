@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"d:\\\\AALynx'sWorkspace\\\\PHM_entity\\\\app\\\\routers\")"
+    ],
+    "additionalDirectories": [
+      "d:\\AALynx'sWorkspace\\PHM_entity\\app"
+    ]
+  }
+}
