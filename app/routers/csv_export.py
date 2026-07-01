@@ -7,8 +7,8 @@ import httpx
 router = APIRouter(prefix="/api", tags=["csv"])
 
 # ── upstream addresses ──────────────────────────────────────────────
-CSV_UPSTREAM = "http://192.168.31.13:8001"
-ALGO_BASE = "http://192.168.31.13:8001"
+CSV_UPSTREAM = "http://127.0.0.1:8001"
+ALGO_BASE = "http://127.0.0.1:8001"
 
 # ── Pydantic schemas ────────────────────────────────────────────────
 
@@ -36,11 +36,12 @@ async def train_model(req: TrainRequest):
     2. POSTs the CSV text to ``{instance_id}/train`` on the algorithm service.
     3. Returns the training result (or ``[]`` when ``detach=True``).
     """
+    print("enter train mode")
     # ── 1.  Fetch CSV text from upstream CSV service ────────────────
     columns_str = ",".join(req.data_cols + req.label_cols)
     csv_url = f"{CSV_UPSTREAM}/api/csv/export-columns"
     csv_params = {"tableName": req.table_name, "columns": columns_str}
-    # print(f"Fetching CSV from {csv_url} with params {csv_params}...")
+    print(f"Fetching CSV from {csv_url} with params {csv_params}...")
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
         try:
@@ -74,7 +75,7 @@ async def train_model(req: TrainRequest):
         },
         "detach": req.detach,
     }
-    # print(f"Sending training request to {train_url} with payload: {train_payload}")
+    print(f"Sending training request to {train_url} with payload: {train_payload}")
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
         try:
             train_resp = await client.post(train_url, json=train_payload)
