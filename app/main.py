@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from app.database import engine, Base
-from app.routers import csv_export, tasks
+from app.routers import csv_export, display, tasks
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
@@ -14,6 +14,7 @@ app = FastAPI(
 
 app.include_router(tasks.router)
 app.include_router(csv_export.router)
+app.include_router(display.router)
 
 
 @app.get("/")

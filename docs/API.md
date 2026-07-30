@@ -30,6 +30,7 @@ FastAPI 后端服务,基于 SQLite 存储,提供对 `task` 实体的完整 CRUD 
   - [6. 删除 Task](#6-删除-task)
   - [7. 关键字搜索 Task](#7-关键字搜索-task)
   - [8. 按飞机查询 Task](#8-按飞机查询-task)
+  - [9. 图表数据查询(展示代理)](#9-图表数据查询展示代理)
 - [路由匹配顺序说明](#路由匹配顺序说明)
 
 ---
@@ -175,6 +176,7 @@ FastAPI 后端服务,基于 SQLite 存储,提供对 `task` 实体的完整 CRUD 
 | 6 | `DELETE` | `/api/tasks/{task_id}`          | 删除 Task                     | 200       |
 | 7 | `GET`    | `/api/tasks/search`             | 关键字搜索(name/description) | 200       |
 | 8 | `GET`    | `/api/tasks/aircraft/{aircraft_id}` | 按飞机查询 Task(含全局任务并集) | 200       |
+| 9 | `POST`   | `/api/display/raw-data`                       | 图表数据查询(展示代理)          | 200       |
 
 ---
 
@@ -452,6 +454,151 @@ GET /api/tasks/aircraft/ac-001
 **curl 示例**:
 ```bash
 curl "http://127.0.0.1:8000/api/tasks/aircraft/ac-001"
+```
+
+---
+
+### 9. 图表数据查询(展示代理)
+
+根据 `data` / `columns` / `limit` / `type` 拼装 SQL,向外部 CSV 模块(`{UPSTREAM_BASE_URL}/csv/sql`)发起查询,并按 `type` 将上游的行式返回值转换为前端约定的系列式图表数据后返回。本接口为透传代理,不直接读写本地数据库。
+
+> 前端约定的输出结构见下方 [响应模型](#响应模型-displayresponse)。`type` 仅决定后端的列数约束与转换规则,前端按各自图表类型渲染。
+
+```http
+POST /api/display/raw-data
+Content-Type: application/json
+
+{
+    "data": "多维数据",
+    "columns": ["AGE", "RANGE"],
+    "limit": 10,
+    "type": "MAPPING_2D"
+}
+```
+
+#### 请求参数
+
+| 字段       | 类型            | 必填 | 默认值 | 说明                                                              |
+|------------|-----------------|------|--------|-------------------------------------------------------------------|
+| `data`     | string          | 是   | —      | 数据来源标识,对应 SQL 中的 `csv_{data}` 表名部分                  |
+| `columns`  | Array[string]   | 是   | —      | 参与展示的列名列表,列数须与 `type` 约定一致;将转大写后拼入 SELECT |
+| `limit`    | integer         | 否   | `0`    | 返回数据点数量上限;`0` 表示不限制(不生成 LIMIT 子句)            |
+| `type`     | string(枚举)   | 是   | —      | 图表类型,见 [type 枚举](#type-枚举)                              |
+
+##### type 枚举
+
+| 值                     | 说明             | 列数约束 | 轴列(共用)         | parameter(每列一系) | dimensions 长度 |
+|------------------------|------------------|----------|---------------------|----------------------|-----------------|
+| `SINGLE_TIMESERIES_2D` | 二维单参数时序图 | 恰好 2   | `columns[0]`(时间) | `[columns[1]]`       | 2               |
+| `MULTI_TIMESERIES_2D`  | 二维多参数时序图 | ≥ 3      | `columns[0]`(时间) | `columns[1:]`        | 2               |
+| `MAPPING_2D`           | 二维双参数映射图 | 恰好 2   | `columns[0]`(x)     | `[columns[1]]`       | 2               |
+| `POINT_CLOUD_3D`       | 三维点云图       | 恰好 3   | `columns[0], columns[1]`(x,y) | `[columns[2]]` | 3               |
+
+> 各类型的数据点构造见 [转换规则](#转换规则)。时序类型(`SINGLE_TIMESERIES_2D` / `MULTI_TIMESERIES_2D`)的首轴 `unit` 固定为 `"time"`,其余维度 `unit` 默认空串。
+
+#### 成功响应 (200 OK)
+
+```json
+{
+    "dimensions": [
+        { "name": "AGE", "unit": "" },
+        { "name": "RANGE", "unit": "" }
+    ],
+    "parameter": ["RANGE"],
+    "data": [
+        {
+            "parameter": "RANGE",
+            "data": [
+                [3.708842, 19.6118242],
+                [1.712816, 19.6118242],
+                [0.907223, 19.46265851]
+            ]
+        }
+    ]
+}
+```
+
+> `color` 为可选字段,值为 `null` 时不出现在响应中。数据点中的字符串数值(如 `"3.708842"`)会被转为数值类型;时间标签、标识等非数值列保持字符串。
+
+#### 响应模型 DisplayResponse
+
+| 字段          | 类型                  | 必填 | 说明                                                        |
+|---------------|-----------------------|------|-------------------------------------------------------------|
+| `dimensions`  | Array[DimensionObject]| 是   | 图表维度定义,长度决定坐标轴数量(1/2/3)                    |
+| `parameter`   | Array[string]         | 是   | 参数名称列表,每个元素对应 `data` 中一个数据系列            |
+| `data`        | Array[SeriesObject]   | 是   | 数据系列集合,长度与 `parameter` 列表一致                   |
+
+**DimensionObject**
+
+| 字段   | 类型   | 必填 | 默认值 | 说明                                          |
+|--------|--------|------|--------|-----------------------------------------------|
+| `name` | string | 是   | —      | 维度名称,取自查询结果的列名                  |
+| `unit` | string | 是   | `""`   | 数据单位;时序轴为 `time`,其余默认空串        |
+
+**SeriesObject**
+
+| 字段        | 类型            | 必填 | 说明                                                          |
+|-------------|-----------------|------|---------------------------------------------------------------|
+| `parameter` | string          | 是   | 参数名称,与 `parameter` 列表中的元素对应                      |
+| `color`     | string          | 否   | 系列颜色(如 `#FF0000`),由前端分配;为空时不输出             |
+| `data`      | Array[Array]    | 是   | 数据点集合;每个内层数组的元素顺序与 `dimensions` 一致        |
+
+#### 转换规则
+
+上游 CSV 模块返回行式结构(`{success, data:[{col:val}], columns, totalRows}`),后端按 `type` 转换为系列式结构。每个系列的数据点 = `[各轴列的行值..., 该参数的行值]`,元素顺序与 `dimensions` 一致:
+
+- **SINGLE_TIMESERIES_2D**:`axis=[col0]`, `params=[col1]` → 单系列,点 `[t, v]`
+- **MULTI_TIMESERIES_2D**:`axis=[col0]`, `params=col1...` → 多系列,各点 `[t, v_i]`;`dimensions` 仅取 `[col0, col1]` 前两列
+- **MAPPING_2D**:`axis=[col0]`, `params=[col1]` → 单系列,点 `[x, y]`
+- **POINT_CLOUD_3D**:`axis=[col0, col1]`, `params=[col2]` → 单系列,点 `[x, y, z]`
+
+> MULTI 类型的 `dimensions` 只取前两列(时间 + 首参数):前端画二维图,多参数共享同一时间 x 轴,各参数一条 y 曲线。
+
+##### MULTI_TIMESERIES_2D 示例
+
+请求 `columns = ["Time", "Temperature", "Humidity"]`,`type = "MULTI_TIMESERIES_2D"`:
+
+```json
+{
+    "dimensions": [
+        { "name": "Time", "unit": "time" },
+        { "name": "Temperature", "unit": "" }
+    ],
+    "parameter": ["Temperature", "Humidity"],
+    "data": [
+        {
+            "parameter": "Temperature",
+            "data": [["11:30", 100], ["12:00", 110], ["13:00", 115]]
+        },
+        {
+            "parameter": "Humidity",
+            "data": [["11:30", 45], ["12:00", 48], ["13:00", 46]]
+        }
+    ]
+}
+```
+
+#### 错误响应
+
+除通用的 `422`(请求体校验失败)外,本接口额外可能返回:
+
+| 状态码 | 触发场景                                                                |
+|--------|-------------------------------------------------------------------------|
+| `422`  | `columns` 列数与 `type` 约定不符(见 [type 枚举](#type-枚举))          |
+| `502`  | 无法连接外部 CSV 模块、上游返回非 2xx、或上游 `success: false`          |
+| `504`  | 外部 CSV 模块请求超时                                                    |
+
+#### curl 示例
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/display/raw-data \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data": "多维数据",
+    "columns": ["AGE", "RANGE"],
+    "limit": 10,
+    "type": "MAPPING_2D"
+  }'
 ```
 
 ---

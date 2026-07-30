@@ -4,11 +4,28 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import httpx
 
+from app.config import UPSTREAM_BASE_URL
+
 router = APIRouter(prefix="/api", tags=["csv"])
 
-# ── upstream addresses ──────────────────────────────────────────────
-CSV_UPSTREAM = "http://192.168.31.13:8001"
-ALGO_BASE = "http://192.168.31.13:8001"
+# ── upstream endpoints(统一 base URL 见 app.config)─────────────────
+CSV_UPSTREAM = UPSTREAM_BASE_URL
+ALGO_BASE = UPSTREAM_BASE_URL
+
+# 进程级共享 HTTP 客户端:CSV 服务与算法服务同处 192.168.31.13:8001,
+# 共用同一个连接池 + keep-alive(同一请求内串行的两次调用也能复用连接)。
+# 此前每个请求都 `async with AsyncClient(...)` 两次(CSV 取数 + 算法调用),
+# 仅客户端构造每次就耗 ~2s(默认建 SSL 上下文加载证书库 + trust_env 读代理,
+# 而目标是 http LAN 地址,均用不上)。改为启动期构造一次,从热路径移除。
+# trust_env=False:只访问 LAN http 主机,无需代理 / .netrc 查找。
+# 默认超时 30s(CSV 取数用);算法训练 / 推理较慢,在请求级用 timeout= 覆盖为 120s。
+_http_client = httpx.AsyncClient(
+    timeout=httpx.Timeout(30.0, connect=10.0),
+    trust_env=False,
+    limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+)
+# 算法训练 / 推理请求级超时:训练可能较久,放宽到 120s
+_ALGO_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
 # ── Pydantic schemas ────────────────────────────────────────────────
 
@@ -42,20 +59,19 @@ async def train_model(req: TrainRequest):
     csv_params = {"tableName": req.table_name, "columns": columns_str}
     # print(f"Fetching CSV from {csv_url} with params {csv_params}...")
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-        try:
-            csv_resp = await client.get(csv_url, params=csv_params)
-            csv_resp.raise_for_status()
-        except httpx.ConnectError:
-            raise HTTPException(status_code=502, detail="Cannot connect to CSV service")
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail="CSV service timed out")
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"CSV service returned {e.response.status_code}: {e.response.text[:500]}",
-            )
-        csv_text = csv_resp.text
+    try:
+        csv_resp = await _http_client.get(csv_url, params=csv_params)
+        csv_resp.raise_for_status()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to CSV service")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="CSV service timed out")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"CSV service returned {e.response.status_code}: {e.response.text[:500]}",
+        )
+    csv_text = csv_resp.text
 
     # ── 2.  POST to algorithm /train ───────────────────────────────
     train_url = f"{ALGO_BASE}/{req.instance_id}/train"
@@ -75,19 +91,18 @@ async def train_model(req: TrainRequest):
         "detach": req.detach,
     }
     # print(f"Sending training request to {train_url} with payload: {train_payload}")
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
-        try:
-            train_resp = await client.post(train_url, json=train_payload)
-            train_resp.raise_for_status()
-        except httpx.ConnectError:
-            raise HTTPException(status_code=502, detail="Cannot connect to algorithm service")
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail="Algorithm service timed out")
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Algorithm service returned {e.response.status_code}: {e.response.text[:500]}",
-            )
+    try:
+        train_resp = await _http_client.post(train_url, json=train_payload, timeout=_ALGO_TIMEOUT)
+        train_resp.raise_for_status()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to algorithm service")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Algorithm service timed out")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Algorithm service returned {e.response.status_code}: {e.response.text[:500]}",
+        )
 
     return train_resp.json()
 
@@ -121,20 +136,19 @@ async def infer_model(req: InferRequest):
 
     # print(f"Fetching CSV from {csv_url} with params {csv_params}...")
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-        try:
-            csv_resp = await client.get(csv_url, params=csv_params)
-            csv_resp.raise_for_status()
-        except httpx.ConnectError:
-            raise HTTPException(status_code=502, detail="Cannot connect to CSV service")
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail="CSV service timed out")
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"CSV service returned {e.response.status_code}: {e.response.text[:500]}",
-            )
-        csv_text = csv_resp.text
+    try:
+        csv_resp = await _http_client.get(csv_url, params=csv_params)
+        csv_resp.raise_for_status()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to CSV service")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="CSV service timed out")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"CSV service returned {e.response.status_code}: {e.response.text[:500]}",
+        )
+    csv_text = csv_resp.text
 
     # ── 2.  POST to algorithm /infer ───────────────────────────────
     infer_url = f"{ALGO_BASE}/{req.instance_id}/infer"
@@ -154,18 +168,17 @@ async def infer_model(req: InferRequest):
 
     # print(f"Sending inference request to {infer_url} with payload: {infer_payload}")
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
-        try:
-            infer_resp = await client.post(infer_url, json=infer_payload)
-            infer_resp.raise_for_status()
-        except httpx.ConnectError:
-            raise HTTPException(status_code=502, detail="Cannot connect to algorithm service")
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail="Algorithm service timed out")
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Algorithm service returned {e.response.status_code}: {e.response.text[:500]}",
-            )
+    try:
+        infer_resp = await _http_client.post(infer_url, json=infer_payload, timeout=_ALGO_TIMEOUT)
+        infer_resp.raise_for_status()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to algorithm service")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Algorithm service timed out")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Algorithm service returned {e.response.status_code}: {e.response.text[:500]}",
+        )
 
     return infer_resp.json()
