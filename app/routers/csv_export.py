@@ -53,11 +53,12 @@ async def train_model(req: TrainRequest):
     2. POSTs the CSV text to ``{instance_id}/train`` on the algorithm service.
     3. Returns the training result (or ``[]`` when ``detach=True``).
     """
+    print("enter train mode")
     # ── 1.  Fetch CSV text from upstream CSV service ────────────────
     columns_str = ",".join(req.data_cols + req.label_cols)
     csv_url = f"{CSV_UPSTREAM}/api/csv/export-columns"
     csv_params = {"tableName": req.table_name, "columns": columns_str}
-    # print(f"Fetching CSV from {csv_url} with params {csv_params}...")
+    print(f"Fetching CSV from {csv_url} with params {csv_params}...")
 
     try:
         csv_resp = await _http_client.get(csv_url, params=csv_params)
