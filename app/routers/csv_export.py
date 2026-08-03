@@ -53,12 +53,10 @@ async def train_model(req: TrainRequest):
     2. POSTs the CSV text to ``{instance_id}/train`` on the algorithm service.
     3. Returns the training result (or ``[]`` when ``detach=True``).
     """
-    print("enter train mode")
     # ── 1.  Fetch CSV text from upstream CSV service ────────────────
     columns_str = ",".join(req.data_cols + req.label_cols)
     csv_url = f"{CSV_UPSTREAM}/api/csv/export-columns"
     csv_params = {"tableName": req.table_name, "columns": columns_str}
-    print(f"Fetching CSV from {csv_url} with params {csv_params}...")
 
     try:
         csv_resp = await _http_client.get(csv_url, params=csv_params)
@@ -91,7 +89,7 @@ async def train_model(req: TrainRequest):
         },
         "detach": req.detach,
     }
-    # print(f"Sending training request to {train_url} with payload: {train_payload}")
+
     try:
         train_resp = await _http_client.post(train_url, json=train_payload, timeout=_ALGO_TIMEOUT)
         train_resp.raise_for_status()
@@ -135,8 +133,6 @@ async def infer_model(req: InferRequest):
     csv_url = f"{CSV_UPSTREAM}/api/csv/export-columns"
     csv_params = {"tableName": req.table_name, "columns": columns_str}
 
-    # print(f"Fetching CSV from {csv_url} with params {csv_params}...")
-
     try:
         csv_resp = await _http_client.get(csv_url, params=csv_params)
         csv_resp.raise_for_status()
@@ -166,8 +162,6 @@ async def infer_model(req: InferRequest):
         },
         "detach": req.detach,
     }
-
-    # print(f"Sending inference request to {infer_url} with payload: {infer_payload}")
 
     try:
         infer_resp = await _http_client.post(infer_url, json=infer_payload, timeout=_ALGO_TIMEOUT)

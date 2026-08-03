@@ -26,7 +26,7 @@ import random
 from pathlib import Path
 
 # 默认输出到工作区根目录（本脚本的上两级目录）。
-DEFAULT_OUTPUT = Path(__file__).resolve().parent.parent / "单参时序数据.csv"
+DEFAULT_OUTPUT = Path(__file__).resolve().parent.parent / "data" / "单参时序数据.csv"
 
 
 def fmt_time(total_seconds: int) -> str:
@@ -83,9 +83,9 @@ def main() -> None:
     rows = generate(args)
 
     # utf-8-sig 带 BOM，便于 Windows Excel 正确识别中文表头；pandas 读取同样兼容。
-    with args.output.open("w", encoding="utf-8-sig", newline="") as f:
+    with args.output.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["时间", "温度(℃)"])
+        writer.writerow(["time", "temperature"])
         writer.writerows(rows)
 
     temps = [t for _, t in rows]

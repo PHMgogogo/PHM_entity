@@ -6,13 +6,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import httpx
 
-
-def _t(tag: str, t0: float) -> float:
-    """打印 [display-timing] {tag}: 累计耗时 / 分段耗时,返回当前时间戳。"""
-    now = time.perf_counter()
-    print(f"[display-timing] {tag:28s} +{(now - t0) * 1000:8.2f} ms", flush=True)
-    return now
-
 from app.config import UPSTREAM_BASE_URL
 
 router = APIRouter(prefix="/api", tags=["display"])
@@ -197,30 +190,25 @@ async def display(req: DisplayRequest):
     转换规则见 `_transform`。
     """
     # ── 1. 校验列数 ──────────────────────────────────────────────────
-    t_start = time.perf_counter()
-    t = _t("start", t_start)
     _validate_columns(req.type, len(req.columns))
-    t = _t("1. validate_columns", t)
 
     # ── 2. 拼装 SQL ──────────────────────────────────────────────────
     columns_sql = ", ".join(c.upper() for c in req.columns)
     sql = f"SELECT {columns_sql} FROM csv_{req.data}"
+    print(f"[display] SQL: {sql} (limit={req.limit})")
     if req.limit > 0:
         sql += f" LIMIT {req.limit}"
-    t = _t("2. build_sql", t)
 
     # ── 3. 向外部 CSV 模块发起请求(复用共享 _http_client)────────────
     try:
         # 手动序列化并指定 ensure_ascii=False,
         # 避免 httpx 默认 json= 将中文转义为 \uXXXX
         payload = json.dumps({"sql": sql}, ensure_ascii=False)
-        t = _t("3a. serialize payload", t)
         resp = await _http_client.post(
             SQL_ENDPOINT,
             content=payload,
             headers={"Content-Type": "application/json"},
         )
-        t = _t("3b. upstream POST (net+SQL)", t)
         resp.raise_for_status()
     except httpx.ConnectError:
         raise HTTPException(status_code=502, detail="Cannot connect to CSV service")
@@ -235,7 +223,6 @@ async def display(req: DisplayRequest):
         )
 
     upstream = resp.json()
-    t = _t("4a. resp.json()", t)
 
     # ── 4. 校验上游返回 ─────────────────────────────────────────────
     if not upstream.get("success", False):
@@ -245,18 +232,10 @@ async def display(req: DisplayRequest):
         )
 
     rows: list[dict[str, Any]] = upstream.get("data", []) or []
-    # 列顺序以上游返回为准;上游缺失时回退到请求列(转大写)
-    cols: list[str] = upstream.get("columns") or [c.upper() for c in req.columns]
-    if not cols:
-        raise HTTPException(status_code=502, detail="CSV service returned no columns")
-    print(f"[display-timing] rows={len(rows)}, cols={len(cols)}", flush=True)
+    # 列顺序以请求为准:rows 是按列名索引的 dict,_build_series 经 row.get(key)
+    # 取值,点结构完全由 cols 顺序决定,不受上游 columns 返回顺序影响。
+    cols: list[str] = [c.upper() for c in req.columns]
 
     # ── 5. 行式 → 系列式转换 ───────────────────────────────────────
     result = _transform(req.type, cols, rows)
-    t = _t("5. transform", t)
-    print(
-        f"[display-timing] {'TOTAL':28s} ="
-        f" {(time.perf_counter() - t_start) * 1000:8.2f} ms",
-        flush=True,
-    )
     return result
