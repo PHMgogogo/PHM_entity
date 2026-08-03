@@ -5,4 +5,4 @@
 """
 
 # 外部模块统一 base URL(CSV 服务 / 算法服务等)
-UPSTREAM_BASE_URL = "http://152.136.119.117:8080"
+UPSTREAM_BASE_URL = "http://127.0.0.1:8001"

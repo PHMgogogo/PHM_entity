@@ -11,7 +11,7 @@ from app.config import UPSTREAM_BASE_URL
 router = APIRouter(prefix="/api", tags=["display"])
 
 # 外部 CSV 模块的 SQL 查询接口
-SQL_ENDPOINT = f"{UPSTREAM_BASE_URL}/csv/sql"
+SQL_ENDPOINT = f"{UPSTREAM_BASE_URL}/api/csv/sql"
 
 # 进程级共享 HTTP 客户端:全模块复用同一个连接池 + keep-alive。
 # 此前每次请求都 `async with httpx.AsyncClient(...)`,仅客户端构造就耗时
