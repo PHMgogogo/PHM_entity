@@ -460,7 +460,7 @@ curl "http://127.0.0.1:8000/api/tasks/aircraft/ac-001"
 
 ### 9. 图表数据查询(展示代理)
 
-根据 `data` / `columns` / `limit` / `type` 拼装 SQL,向外部 CSV 模块(`{UPSTREAM_BASE_URL}/csv/sql`)发起查询,并按 `type` 将上游的行式返回值转换为前端约定的系列式图表数据后返回。本接口为透传代理,不直接读写本地数据库。
+根据 `data` / `columns` / `limit` / `type` 拼装 SQL,向外部 CSV 模块(`SQL_ENDPOINT`,见 `app.config`)发起查询,并按 `type` 将上游的行式返回值转换为前端约定的系列式图表数据后返回。本接口为透传代理,不直接读写本地数据库。
 
 > 前端约定的输出结构见下方 [响应模型](#响应模型-displayresponse)。`type` 仅决定后端的列数约束与转换规则,前端按各自图表类型渲染。
 
