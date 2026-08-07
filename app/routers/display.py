@@ -1,12 +1,21 @@
 import json
+import os
+import re
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 import httpx
 
-from app.config import SQL_ENDPOINT
+from app.config import (
+    DISPLAY_CANVAS_DIR,
+    DISPLAY_CANVAS_MAX_COUNT,
+    DISPLAY_CANVAS_TTL_SECONDS,
+    SQL_ENDPOINT,
+)
 
 router = APIRouter(prefix="/api", tags=["display"])
 
@@ -236,3 +245,175 @@ async def display(req: DisplayRequest):
     # ── 5. 行式 → 系列式转换 ───────────────────────────────────────
     result = _transform(req.type, cols, rows)
     return result
+
+
+# ── 画布快照持久化(opaque blob store)──────────────────────────────
+# 数据展示页(MonitorView)的画布状态序列化为 JSON,后端原样落盘、原样取回。
+# 硬约束:canvas 是「不透明 blob」,只逐字段保真存取——不解析、不裁剪、
+# 不强转类型、不重排字段(见 plan.md §1 / §4.1)。因此本接口不使用 Pydantic
+# 解析请求体,而是直接读取原始 body 经 json.loads 处理:Python json 模块对
+# int/float/bool/None 与字典插入顺序均逐字段保真,足以满足契约。
+_CANVAS_DIR = Path(DISPLAY_CANVAS_DIR)
+
+# 保留策略(惰性清理,见 cleanup_canvas_store):最后访问(save/load)距今超过
+# TTL 即过期;数量超过 MAX 时按最久未访问优先淘汰。
+_CANVAS_TTL_SECONDS = DISPLAY_CANVAS_TTL_SECONDS
+_CANVAS_MAX_COUNT = DISPLAY_CANVAS_MAX_COUNT
+
+# key 直接用作落盘文件名,必须做路径穿越防护:仅允许白名单字符且限长 64,
+# 拒绝空串 / ".." / "/" 等,避免写出到存储目录之外。
+_KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+_MAX_KEY_LENGTH = 64
+
+
+def _validate_key(key: Any) -> str:
+    """校验画布 key,通过则返回其值;非法 key 抛 400。"""
+    if not isinstance(key, str) or not key:
+        raise HTTPException(status_code=400, detail="key must be a non-empty string")
+    if len(key) > _MAX_KEY_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"key too long (max {_MAX_KEY_LENGTH} chars)",
+        )
+    if not _KEY_PATTERN.fullmatch(key):
+        raise HTTPException(
+            status_code=400,
+            detail="key may only contain letters, digits, '_' and '-'",
+        )
+    return key
+
+
+def _canvas_path(key: str) -> Path:
+    """返回 key 对应的落盘文件路径:<DIR>/<key>.json。"""
+    return _CANVAS_DIR / f"{key}.json"
+
+
+def _safe_unlink(path: Path) -> bool:
+    """删除文件,失败返回 False 而不抛出(best-effort)。"""
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def cleanup_canvas_store() -> dict[str, int]:
+    """惰性清理画布快照目录(best-effort,任何异常仅告警、不抛出)。
+
+    规则:
+    1. 过期:文件 mtime(最后访问)距今超过 ``_CANVAS_TTL_SECONDS`` → 删除;
+    2. 总量:剩余数量超过 ``_CANVAS_MAX_COUNT`` 时,按 mtime 升序(最久未访问
+       优先)淘汰至不超过上限。
+
+    「访问时间」取文件 mtime——save 写入、load 的 touch 均会刷新。由 save 与
+    进程启动(main.py lifespan)触发。
+    """
+    stats = {"expired": 0, "evicted": 0, "remaining": 0}
+    try:
+        if not _CANVAS_DIR.is_dir():
+            return stats
+        now = time.time()
+        live: list[tuple[float, Path]] = []
+        for p in _CANVAS_DIR.iterdir():
+            # 仅处理正式快照,跳过 .tmp 等中间文件
+            if p.suffix != ".json" or not p.is_file():
+                continue
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                continue
+            if now - mtime > _CANVAS_TTL_SECONDS:
+                if _safe_unlink(p):
+                    stats["expired"] += 1
+                continue
+            live.append((mtime, p))
+
+        # 总量上限:最久未访问(mtime 最小)优先淘汰
+        live.sort(key=lambda t: t[0])
+        excess = max(0, len(live) - _CANVAS_MAX_COUNT)
+        for _, p in live[:excess]:
+            if _safe_unlink(p):
+                stats["evicted"] += 1
+        stats["remaining"] = max(0, len(live) - stats["evicted"])
+        if stats["expired"] or stats["evicted"]:
+            print(f"[display] canvas cleanup: {stats}")
+        return stats
+    except OSError as e:
+        print(f"[display] canvas cleanup failed: {e}")
+        return stats
+
+
+@router.post("/display/save")
+async def save_canvas(request: Request):
+    """保存(覆盖)当前画布快照。
+
+    请求体即「存储信封」``{ key, canvas, timestamp }``:后端原样持久化整个
+    请求体并附加服务端落盘时刻 ``savedAt``。``canvas`` 当作不透明 blob 逐字段
+    保真存储(见 plan.md §3.1 / §4.1),同 key 再次保存即覆盖(last-write-wins)。
+
+    成功返回 ``{ key, savedAt }``(见 plan.md §3.1)。
+    """
+    # ── 1. 读取原始请求体并解析(不经 Pydantic,保证 canvas 保真)────
+    raw = await request.body()
+    try:
+        body = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="request body is not valid JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="request body must be a JSON object")
+
+    # ── 2. 校验信封字段:key / canvas 必备 ─────────────────────────
+    key = _validate_key(body.get("key"))
+    if body.get("canvas") is None:
+        raise HTTPException(status_code=400, detail="missing 'canvas' in request body")
+
+    # ── 3. 附加服务端落盘时刻(savedAt),原样落盘整个信封 ───────────
+    # canvas 未被触碰;ensure_ascii=False 仅影响存储形式,json 往返无损。
+    saved_at = datetime.now(timezone.utc).isoformat()
+    body["savedAt"] = saved_at
+    payload = json.dumps(body, ensure_ascii=False)
+
+    _CANVAS_DIR.mkdir(parents=True, exist_ok=True)
+    path = _canvas_path(key)
+    # 写临时文件再原子替换,避免并发写或写中途崩溃损坏快照。
+    tmp_path = path.with_name(f".{key}.json.tmp")
+    tmp_path.write_text(payload, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+    # 惰性清理:过期快照 + 超量淘汰(刚保存的 mtime 最新,不会被误删)。
+    cleanup_canvas_store()
+
+    return {"key": key, "savedAt": saved_at}
+
+
+@router.get("/display/load")
+async def load_canvas(key: str = Query(..., description="画布标识,用作快照文件名")):
+    """读取指定 key 的画布快照并原样回传。
+
+    成功返回 ``{ key, canvas, savedAt }``(见 plan.md §3.6);不存在返回 404。
+    ``canvas`` 为落盘时的原始内容,逐字段保真。
+    """
+    # ── 1. 校验 key(同样做路径穿越防护)─────────────────────────────
+    _validate_key(key)
+
+    path = _canvas_path(key)
+    if not path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"no saved canvas for key: {key}",
+        )
+
+    # ── 2. 原样读回,取信封层字段(canvas 原样透传)──────────────────
+    body = json.loads(path.read_text(encoding="utf-8"))
+
+    # 刷新访问时间(仅文件时间戳,不改内容与 savedAt),用于过期判定。
+    try:
+        os.utime(path)
+    except OSError:
+        pass
+
+    return {
+        "key": body.get("key", key),
+        "canvas": body.get("canvas"),
+        "savedAt": body.get("savedAt"),
+    }

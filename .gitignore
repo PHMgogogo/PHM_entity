@@ -6,3 +6,6 @@ app/routers/__pycache__/
 
 phm_entity.db
 deployment/
+
+# 画布快照(运行时生成,勿提交)
+data/display_canvases/
