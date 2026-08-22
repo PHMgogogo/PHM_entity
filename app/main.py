@@ -3,7 +3,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.database import engine, Base
-from app.routers import csv_export, display, tasks
+from app.routers import (
+    analysis_alarm,
+    analysis_model,
+    analysis_result,
+    csv_export,
+    display,
+    tasks,
+)
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
@@ -24,6 +31,9 @@ app = FastAPI(
 )
 
 app.include_router(tasks.router)
+app.include_router(analysis_model.router)
+app.include_router(analysis_result.router)
+app.include_router(analysis_alarm.router)
 app.include_router(csv_export.router)
 app.include_router(display.router)
 

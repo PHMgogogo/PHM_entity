@@ -1,6 +1,15 @@
 # import re
+from datetime import datetime
 
-from sqlalchemy import Boolean, Column, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from app.database import Base
 
@@ -48,3 +57,61 @@ class Task(Base):
     # def validate_session_id(session_id: str) -> bool:
     #     """Session_id must be composed of alphanumeric characters, hyphens, and underscores."""
     #     return bool(re.fullmatch(r"[A-Za-z0-9\-_]+", session_id))
+
+
+class AnalysisModel(Base):
+    """Database entity corresponding to the ``AnalysisModel`` schema (a machine-learning model)."""
+
+    __tablename__ = "analysis_models"
+    __table_args__ = (
+        UniqueConstraint(
+            "instance_id", "version", name="uq_analysis_model_instance_version"
+        ),
+    )
+
+    model_id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    instance_id = Column(String(255), nullable=False, index=True)
+    path = Column(Text, nullable=False)
+    description = Column(Text, nullable=False, default="")
+    version = Column(String(50), nullable=False, default="1.0.0")
+    time = Column(DateTime, nullable=False, default=datetime.now)
+
+
+class AnalysisResult(Base):
+    """Database entity corresponding to the ``AnalysisResult`` schema.
+
+    ``n_col`` / ``n_row`` 由上传的 CSV 文件解析得到;未上传文件(仅注册)时
+    ``csv_path`` 为空、``n_col`` / ``n_row`` 为 0。
+    """
+
+    __tablename__ = "analysis_results"
+
+    result_id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    instance_id = Column(String(255), nullable=False, index=True)
+    time = Column(DateTime, nullable=False, default=datetime.now)
+    csv_path = Column(Text, nullable=False, default="")
+    n_col = Column(Integer, nullable=False, default=0)
+    n_row = Column(Integer, nullable=False, default=0)
+    raw_data = Column(Text, nullable=False, default="")
+
+
+class AnalysisAlarm(Base):
+    """Database entity corresponding to the ``AnalysisAlarm`` schema.
+
+    ``cols`` 以逗号分隔字符串存单个字段(约定列名不含逗号);
+    ``range`` 用 ``range_start`` / ``range_end`` 两个字段存储;
+    ``level`` 表示告警等级。
+    """
+
+    __tablename__ = "analysis_alarms"
+
+    alarm_id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    instance_id = Column(String(255), nullable=False, index=True)
+    cols = Column(Text, nullable=False, default="")
+    range_start = Column(Integer, nullable=False, default=0)
+    range_end = Column(Integer, nullable=False, default=0)
+    message = Column(Text, nullable=False, default="")
+    raw_data = Column(Text, nullable=False, default="")
+    time = Column(DateTime, nullable=False, default=datetime.now)
+    level = Column(Integer, nullable=False, default=0)
+
