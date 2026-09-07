@@ -1,11 +1,13 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy import inspect, text
 
 from app.database import engine, Base
 from app.routers import (
     analysis_alarm,
     analysis_model,
+    analysis_pipeline,
     analysis_result,
     csv_export,
     display,
@@ -34,6 +36,7 @@ app.include_router(tasks.router)
 app.include_router(analysis_model.router)
 app.include_router(analysis_result.router)
 app.include_router(analysis_alarm.router)
+app.include_router(analysis_pipeline.router)
 app.include_router(csv_export.router)
 app.include_router(display.router)
 

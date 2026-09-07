@@ -40,6 +40,10 @@ class TaskCreate(BaseModel):
     default: bool = Field(
         default=False, description="Whether this is the default task for its aircraft"
     )
+    algo_cols: list[str] = Field(
+        default_factory=list,
+        description="Names of each dimension of the instance algorithm's output",
+    )
 
     # @field_validator("session_id")
     # @classmethod
@@ -68,6 +72,7 @@ class TaskResponse(BaseModel):
     work_dir: str
     is_global: bool
     default: bool
+    algo_cols: list[str]
 
     model_config = {"from_attributes": True}
 
@@ -94,6 +99,9 @@ class TaskUpdate(BaseModel):
     is_global: bool | None = Field(None, description="Whether this is a global task")
     default: bool | None = Field(
         None, description="Whether this is the default task for its aircraft"
+    )
+    algo_cols: list[str] | None = Field(
+        None, description="Names of each dimension of the instance algorithm's output"
     )
 
 
@@ -210,6 +218,7 @@ class AnalysisAlarmCreate(BaseModel):
     raw_data: str = ""
     time: datetime = Field(default_factory=datetime.now)
     level: int = Field(default=0, description="Alarm severity level")
+    threshold: float = Field(default=0, description="Alarm threshold value")
 
 
 class AnalysisAlarmDeleteRequest(BaseModel):
@@ -217,3 +226,27 @@ class AnalysisAlarmDeleteRequest(BaseModel):
     (DELETE /api/analysis/alarms)."""
 
     alarm_ids: list[int] = Field(min_length=1)
+
+
+class AnalysisPipelineCreate(BaseModel):
+    """Request schema for creating an analysis pipeline."""
+
+    aircraft_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
+    pipeline_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class AnalysisPipelineUpdate(BaseModel):
+    """Request schema for updating an analysis pipeline — all fields are optional."""
+
+    aircraft_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]+$")
+    pipeline_id: str | None = Field(None, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class AnalysisPipelineResponse(BaseModel):
+    """Response schema for an analysis pipeline."""
+
+    id: int
+    aircraft_id: str
+    pipeline_id: str
+
+    model_config = {"from_attributes": True}

@@ -2,8 +2,13 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.models import Task
-from app.schemas import TaskCreate, TaskUpdate
+from app.models import AnalysisPipeline, Task
+from app.schemas import (
+    AnalysisPipelineCreate,
+    AnalysisPipelineUpdate,
+    TaskCreate,
+    TaskUpdate,
+)
 
 
 def create_task(db: Session, task_in: TaskCreate) -> Task:
@@ -17,6 +22,7 @@ def create_task(db: Session, task_in: TaskCreate) -> Task:
         work_dir=task_in.work_dir,
         is_global=task_in.is_global,
         default=task_in.default,
+        algo_cols=task_in.algo_cols,
     )
     db.add(db_task)
     db.commit()
@@ -102,3 +108,69 @@ def update_task(db: Session, task_id: int, task_in: TaskUpdate) -> Task | None:
     db.commit()
     db.refresh(db_task)
     return db_task
+
+
+def create_analysis_pipeline(
+    db: Session, pipeline_in: AnalysisPipelineCreate
+) -> AnalysisPipeline:
+    """Create a new analysis pipeline and return it."""
+    db_pipeline = AnalysisPipeline(
+        aircraft_id=pipeline_in.aircraft_id,
+        pipeline_id=pipeline_in.pipeline_id,
+    )
+    db.add(db_pipeline)
+    db.commit()
+    db.refresh(db_pipeline)
+    return db_pipeline
+
+
+def get_analysis_pipeline(db: Session, pipeline_id: int) -> AnalysisPipeline | None:
+    """Get a single analysis pipeline by its primary key."""
+    return (
+        db.query(AnalysisPipeline)
+        .filter(AnalysisPipeline.id == pipeline_id)
+        .first()
+    )
+
+
+def get_all_analysis_pipelines(db: Session) -> list[AnalysisPipeline]:
+    """Return all analysis pipelines."""
+    return db.query(AnalysisPipeline).all()
+
+
+def get_analysis_pipelines_by_aircraft(
+    db: Session, aircraft_id: str
+) -> list[AnalysisPipeline]:
+    """Return all analysis pipelines for the given aircraft_id."""
+    return (
+        db.query(AnalysisPipeline)
+        .filter(AnalysisPipeline.aircraft_id == aircraft_id)
+        .all()
+    )
+
+
+def update_analysis_pipeline(
+    db: Session, pipeline_id: int, pipeline_in: AnalysisPipelineUpdate
+) -> AnalysisPipeline | None:
+    """Update an analysis pipeline by its primary key with the provided fields.
+    Returns the updated pipeline, or None if not found."""
+    db_pipeline = get_analysis_pipeline(db, pipeline_id)
+    if db_pipeline is None:
+        return None
+    update_data = pipeline_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_pipeline, field, value)
+    db.commit()
+    db.refresh(db_pipeline)
+    return db_pipeline
+
+
+def delete_analysis_pipeline(db: Session, pipeline_id: int) -> bool:
+    """Delete an analysis pipeline by its primary key.
+    Returns True if deleted, False if not found."""
+    db_pipeline = get_analysis_pipeline(db, pipeline_id)
+    if db_pipeline is None:
+        return False
+    db.delete(db_pipeline)
+    db.commit()
+    return True

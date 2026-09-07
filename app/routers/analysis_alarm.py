@@ -42,6 +42,7 @@ def create_analysis_alarms(
             raw_data=item.raw_data,
             time=item.time,
             level=item.level,
+            threshold=item.threshold,
         )
         db.add(analysis_alarm)
         created.append(analysis_alarm)

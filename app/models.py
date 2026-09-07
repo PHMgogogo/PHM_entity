@@ -8,6 +8,8 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Float,
+    JSON,
     UniqueConstraint,
 )
 
@@ -51,6 +53,12 @@ class Task(Base):
         Boolean,
         nullable=False,
         default=False,
+    )
+    algo_cols = Column(
+        JSON,
+        nullable=False,
+        default=list,
+        comment="Names of each dimension of the instance algorithm's output (JSON array of strings)",
     )
 
     # @staticmethod
@@ -114,4 +122,23 @@ class AnalysisAlarm(Base):
     raw_data = Column(Text, nullable=False, default="")
     time = Column(DateTime, nullable=False, default=datetime.now)
     level = Column(Integer, nullable=False, default=0)
+    threshold = Column(Float, nullable=False, default=0)
+
+
+class AnalysisPipeline(Base):
+    """Database entity for an analysis pipeline.
+
+    ``(aircraft_id, pipeline_id)`` 联合唯一,表示某架飞机关联的某条分析流水线。
+    """
+
+    __tablename__ = "analysis_pipelines"
+    __table_args__ = (
+        UniqueConstraint(
+            "aircraft_id", "pipeline_id", name="uq_analysis_pipeline_aircraft_pipeline"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    aircraft_id = Column(String(255), nullable=False, index=True)
+    pipeline_id = Column(String(255), nullable=False, index=True)
 
