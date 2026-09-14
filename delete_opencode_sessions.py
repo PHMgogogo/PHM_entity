@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """Delete all OpenCode sessions (conversation history) on this machine.
 
-Targets two SQLite databases under the OpenCode data dir
+Targets the SQLite database under the OpenCode data dir
 (~/.local/share/opencode on this box = C:/Users/<you>/.local/share/opencode):
 
-  - opencode.db        : synced sessions   (table: session)
-  - opencode-local.db  : local-only sessions
+  - opencode.db  : the only db used by OpenCode v2
 
-Deletion strategy:
-  PRAGMA foreign_keys = ON is enabled on each connection, then we delete every
-  row from `session`. The schema's ON DELETE CASCADE then automatically cleans
-  `message`, `part`, `todo`, `session_share`. Session-scoped rows in
-  `event` / `event_sequence` (not cascaded) are removed explicitly for the
-  deleted session ids. The WAL is checkpointed afterwards so the change is
-  fully persisted and OpenCode won't read stale data on next launch.
-
-  Files under storage/session_diff (per-session diffs) are removed too.
+Deletion strategy (OpenCode v2 schema):
+  PRAGMA foreign_keys = ON is enabled on the connection, then we delete every
+  row from `session_v2`. The schema's ON DELETE CASCADE then automatically
+  cleans the session-scoped children `session_message`, `session_inbox` and
+  `session_pending`. Session-scoped rows in `event` / `event_sequence`
+  (keyed by aggregate_id = session id, not FK-cascaded) are removed explicitly
+  for the deleted session ids. The WAL is checkpointed afterwards so the change
+  is fully persisted and OpenCode won't read stale data on next launch.
 
 Safety:
   - DRY-RUN by default. Prints what WOULD be deleted, changes nothing.
     Pass --yes to actually delete.
-  - Before deleting, both .db (+ -wal/-shm) files are copied into a
+  - Before deleting, the .db (+ -wal/-shm) files are copied into a
     timestamped backup folder, unless --no-backup is passed.
 
 Run:
@@ -38,10 +36,10 @@ from datetime import datetime
 from pathlib import Path
 
 DATA_DIR = Path.home() / ".local" / "share" / "opencode"
-DBS = ["opencode.db", "opencode-local.db"]
-SESSION_TABLE = "session"
-CASCADE_CHILDREN = ["message", "part", "todo", "session_share"]  # auto-cleaned via FK cascade
-EVENT_TABLES = ["event", "event_sequence"]                        # cleared per-session-id manually
+DBS = ["opencode.db"]
+SESSION_TABLE = "session_v2"
+CASCADE_CHILDREN = ["session_message", "session_inbox", "session_pending"]  # auto-cleaned via FK cascade
+EVENT_TABLES = ["event", "event_sequence"]                                  # cleared per-session-id manually
 
 
 def open_db(path: Path) -> sqlite3.Connection:
@@ -74,13 +72,13 @@ def purge_db(path: Path, commit: bool) -> None:
 
     # snapshot session ids BEFORE deleting (for event cleanup)
     try:
-        ids = [r[0] for r in con.execute("SELECT id FROM session").fetchall()]
+        ids = [r[0] for r in con.execute(f"SELECT id FROM {SESSION_TABLE}").fetchall()]
     except sqlite3.OperationalError:
         ids = []
 
     if commit and ids:
         placeholders = ",".join("?" * len(ids))
-        con.execute("DELETE FROM session;")  # cascades -> message/part/todo/session_share
+        con.execute(f"DELETE FROM {SESSION_TABLE};")  # cascades -> session_message/inbox/pending
         # events are keyed by aggregate_id = session id but not FK-cascaded; clear manually
         if count_rows(con, "event") and "event" in before:
             con.execute(f"DELETE FROM event WHERE aggregate_id IN ({placeholders})", ids)
@@ -94,20 +92,6 @@ def purge_db(path: Path, commit: bool) -> None:
     after = {t: count_rows(con, t) for t in tables}
     print("  after :", compact(after) or "all empty")
     con.close()
-
-
-def clean_session_diff(base: Path, commit: bool) -> None:
-    sd = base / "storage" / "session_diff"
-    if not sd.exists():
-        return
-    files = [f for f in sd.iterdir() if f.is_file()]
-    if not files:
-        return
-    verb = "removed" if commit else "would remove"
-    print(f"\nsession_diff files: {len(files)} {verb}")
-    if commit:
-        for f in files:
-            f.unlink()
 
 
 def main() -> None:
@@ -140,7 +124,6 @@ def main() -> None:
     for db in DBS:
         purge_db(base / db, commit=args.yes)
 
-    clean_session_diff(base, commit=args.yes)
     print("\nDone.")
 
 

@@ -37,6 +37,12 @@ class Task(Base):
         nullable=False,
         default="",
     )
+    model_code = Column(
+        String(255),
+        nullable=False,
+        default="",
+        comment="Aircraft model code (机型)",
+    )
     work_dir = Column(
         Text,
         nullable=False,
@@ -45,11 +51,6 @@ class Task(Base):
     )
     is_global = Column(
         "global",
-        Boolean,
-        nullable=False,
-        default=False,
-    )
-    default = Column(
         Boolean,
         nullable=False,
         default=False,

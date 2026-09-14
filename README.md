@@ -59,9 +59,9 @@ uvicorn app.main:app --reload
 | `session_id`   | VARCHAR | NOT NULL                                | 由字母、数字、`-`、`_` 连接的字符串         |
 | `aircraft_id`  | VARCHAR | NOT NULL                                | 飞机标识,约束同 session_id                 |
 | `instance_id`  | VARCHAR | NOT NULL                                | 实例标识,约束同 session_id                 |
+| `model_code`   | VARCHAR | NOT NULL, default `""`                  | 机型                                        |
 | `work_dir`     | TEXT    | NOT NULL                                | 跨平台文件系统路径                          |
 | `is_global`    | BOOLEAN | NOT NULL, default false                 | 是否为全局任务(数据库列名为 `global`)     |
-| `default`      | BOOLEAN | NOT NULL, default false                 | 是否为对应飞机的默认任务                    |
 
 > 注:`is_global` 在 API 层命名为 `is_global`,在数据库表中映射为列名 `global`(因 `global` 是 Python 关键字)。对外接口一律使用 `is_global`。
 
@@ -115,9 +115,9 @@ GET /api/tasks/
         "session_id": "abc-123_xyz",
         "aircraft_id": "ac-001",
         "instance_id": "inst-001_abc",
+        "model_code": "C919",
         "work_dir": "/home/user/projects/demo",
-        "is_global": false,
-        "default": false
+        "is_global": false
     }
 ]
 ```

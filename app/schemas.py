@@ -32,14 +32,16 @@ class TaskCreate(BaseModel):
         max_length=255,
         description="Instance identifier composed of letters, digits, hyphens, and underscores",
     )
+    model_code: str = Field(
+        default="",
+        max_length=255,
+        description="Aircraft model code (机型)",
+    )
     work_dir: str = Field(
         default="",
         description="Cross-platform filesystem path",
     )
     is_global: bool = Field(default=False, description="Whether this is a global task")
-    default: bool = Field(
-        default=False, description="Whether this is the default task for its aircraft"
-    )
     algo_cols: list[str] = Field(
         default_factory=list,
         description="Names of each dimension of the instance algorithm's output",
@@ -69,9 +71,9 @@ class TaskResponse(BaseModel):
     session_id: str
     aircraft_id: str
     instance_id: str
+    model_code: str
     work_dir: str
     is_global: bool
-    default: bool
     algo_cols: list[str]
 
     model_config = {"from_attributes": True}
@@ -92,14 +94,14 @@ class TaskUpdate(BaseModel):
     instance_id: str | None = Field(
         None, min_length=1, max_length=255, description="Instance identifier"
     )
+    model_code: str | None = Field(
+        None, max_length=255, description="Aircraft model code (机型)"
+    )
     work_dir: str | None = Field(None, description="Cross-platform filesystem path")
     aircraft_id: str | None = Field(
         None, min_length=1, max_length=255, description="Aircraft identifier"
     )
     is_global: bool | None = Field(None, description="Whether this is a global task")
-    default: bool | None = Field(
-        None, description="Whether this is the default task for its aircraft"
-    )
     algo_cols: list[str] | None = Field(
         None, description="Names of each dimension of the instance algorithm's output"
     )
@@ -125,6 +127,13 @@ class AircraftTasksResponse(BaseModel):
     tasks: list[TaskResponse] = Field(
         default_factory=list,
         description="Tasks for the aircraft unioned with all global tasks (deduplicated by task_id)",
+    )
+    stale_check_failed: bool = Field(
+        default=False,
+        description=(
+            "True when the instance service was unreachable during reconciliation, "
+            "so no stale tasks were cleaned up this time"
+        ),
     )
 
 
