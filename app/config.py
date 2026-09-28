@@ -15,6 +15,7 @@
 CSV_HOST = "http://127.0.0.1:8001"  # 主机:端口
 CSV_SQL_PATH = "/api/csv/sql"  # display: 行式 SQL 查询路由
 CSV_EXPORT_PATH = "/api/csv/export-columns"  # csv_export: 列导出路由
+CSV_TIMESERIES_PATH = "/api/csv/query-timeseries"  # 时序数据统一查询路由
 
 # ── 算法服务节点(与 CSV 服务不同节点)──────────────────────────────
 ALGO_HOST = "http://127.0.0.1:8001"  # 主机:端口
@@ -24,6 +25,7 @@ ALGO_PATH = ""
 # ── 完整 endpoint(供 router 直接引用)───────────────────────────────
 SQL_ENDPOINT = f"{CSV_HOST}{CSV_SQL_PATH}"
 CSV_UPSTREAM = f"{CSV_HOST}{CSV_EXPORT_PATH}"
+CSV_TIMESERIES_ENDPOINT = f"{CSV_HOST}{CSV_TIMESERIES_PATH}"
 ALGO_BASE = f"{ALGO_HOST}{ALGO_PATH}"
 
 # ── 实例服务节点(判定 instance_id 是否存活)───────────────────────

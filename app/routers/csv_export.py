@@ -1,10 +1,12 @@
-from typing import Literal
+import csv
+import io
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import httpx
 
-from app.config import ALGO_BASE, CSV_UPSTREAM
+from app.config import ALGO_BASE, CSV_TIMESERIES_ENDPOINT, CSV_UPSTREAM
 
 router = APIRouter(prefix="/api", tags=["csv"])
 
@@ -117,6 +119,33 @@ class InferRequest(BaseModel):
     device: Literal["cpu", "cuda"] = Field("cpu", description="Compute device")
 
 
+class TimeseriesJobBase(BaseModel):
+    """Common request fields for time-series backed training and inference."""
+
+    airplaneType: str = Field(..., min_length=1, description="Aircraft model code")
+    sortieId: str = Field(..., min_length=1, description="Sortie key")
+    aircraftNumber: str | None = Field(None, description="Aircraft number")
+    startTime: str | None = Field(None, description="Inclusive start time")
+    endTime: str | None = Field(None, description="Inclusive end time")
+    data_cols: list[str] = Field(..., min_length=1, description="Input columns")
+    label_cols: list[str] = Field(default_factory=list, description="Label columns")
+    instance_id: str = Field(..., min_length=1, description="Algorithm instance identifier")
+    batch_size: int = Field(1, ge=1, description="Batch size")
+    detach: bool = Field(False, description="Run asynchronously when True")
+    device: Literal["cpu", "cuda"] = Field("cpu", description="Compute device")
+
+
+class TimeseriesTrainRequest(TimeseriesJobBase):
+    """Request body for POST /api/tasks/train-timeseries."""
+
+    epoch: int = Field(1, ge=1, description="Number of training epochs")
+    learning_rate: float = Field(1e-3, gt=0, description="Learning rate")
+
+
+class TimeseriesInferRequest(TimeseriesJobBase):
+    """Request body for POST /api/tasks/infer-timeseries."""
+
+
 @router.post("/tasks/infer")
 async def infer_model(req: InferRequest):
     """Trigger a model inference task on the algorithm service.
@@ -175,3 +204,150 @@ async def infer_model(req: InferRequest):
         )
 
     return infer_resp.json()
+
+
+# ── Time-series backed training / inference ─────────────────────────
+
+def _requested_timeseries_columns(req: TimeseriesJobBase) -> list[str]:
+    """Return data and label columns in request order, without duplicates."""
+    columns: list[str] = []
+    seen: set[str] = set()
+    for raw in req.data_cols + req.label_cols:
+        name = raw.strip()
+        key = name.casefold()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        columns.append(name)
+    return columns
+
+
+def _timeseries_response_to_csv(payload: dict[str, Any], columns: list[str]) -> str:
+    """Convert the unified time-series response into the CSV expected by algorithms."""
+    if payload.get("code") != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Time-series service returned: {payload.get('message') or payload.get('error') or 'unknown error'}",
+        )
+
+    data = payload.get("data") or {}
+    values_by_name: dict[str, list[Any]] = {}
+    for parameter in data.get("parameters") or []:
+        name = str(parameter.get("name") or "").strip()
+        if name:
+            values_by_name[name.casefold()] = list(parameter.get("values") or [])
+
+    missing = [column for column in columns if column.casefold() not in values_by_name]
+    if missing:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Time-series response is missing requested columns: {', '.join(missing)}",
+        )
+
+    selected_values = [values_by_name[column.casefold()] for column in columns]
+    row_count = max((len(values) for values in selected_values), default=0)
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(columns)
+    for row_index in range(row_count):
+        writer.writerow(
+            [
+                values[row_index] if row_index < len(values) else ""
+                for values in selected_values
+            ]
+        )
+    return output.getvalue()
+
+
+async def _fetch_timeseries_job_csv(req: TimeseriesJobBase) -> str:
+    columns = _requested_timeseries_columns(req)
+    if not columns:
+        raise HTTPException(status_code=422, detail="At least one data or label column is required")
+
+    query: dict[str, Any] = {
+        "airplaneType": req.airplaneType,
+        "sortieId": req.sortieId,
+        "paralist": columns,
+    }
+    if req.aircraftNumber:
+        query["aircraftNumber"] = req.aircraftNumber
+    if req.startTime:
+        query["startTime"] = req.startTime
+    if req.endTime:
+        query["endTime"] = req.endTime
+
+    try:
+        response = await _http_client.post(CSV_TIMESERIES_ENDPOINT, json=query)
+        response.raise_for_status()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to time-series service")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Time-series service timed out")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Time-series service returned {e.response.status_code}: {e.response.text[:500]}",
+        )
+
+    try:
+        payload = response.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Time-series service returned invalid JSON")
+
+    return _timeseries_response_to_csv(payload, columns)
+
+
+async def _run_timeseries_job(req: TimeseriesJobBase, mode: Literal["train", "infer"]):
+    csv_text = await _fetch_timeseries_job_csv(req)
+    payload = {
+        "dataset": {
+            "content_type": "text_csv",
+            "content": csv_text,
+            "data_cols": req.data_cols,
+            "label_cols": req.label_cols if req.label_cols else None,
+        },
+        "args": {
+            "batch_size": req.batch_size,
+            "device": req.device,
+        },
+        "detach": req.detach,
+    }
+    if isinstance(req, TimeseriesTrainRequest):
+        payload["args"].update(
+            {
+                "epoch": req.epoch,
+                "learning_rate": req.learning_rate,
+            }
+        )
+
+    algorithm_url = f"{ALGO_BASE}/{req.instance_id}/{mode}"
+    try:
+        response = await _http_client.post(
+            algorithm_url,
+            json=payload,
+            timeout=_ALGO_TIMEOUT,
+        )
+        response.raise_for_status()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to algorithm service")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Algorithm service timed out")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Algorithm service returned {e.response.status_code}: {e.response.text[:500]}",
+        )
+
+    return response.json()
+
+
+@router.post("/tasks/train-timeseries")
+async def train_timeseries_model(req: TimeseriesTrainRequest):
+    """Train an algorithm instance using data from the unified time-series API."""
+    return await _run_timeseries_job(req, "train")
+
+
+@router.post("/tasks/infer-timeseries")
+async def infer_timeseries_model(req: TimeseriesInferRequest):
+    """Run inference using data from the unified time-series API."""
+    return await _run_timeseries_job(req, "infer")
