@@ -59,10 +59,10 @@ class DisplayRequest(BaseModel):
     前端约定的系列式图表数据。
     """
 
-    data: str = Field(..., description="数据来源标识,对应 SQL 中的 csv_{data} 表名部分")
+    data: str = Field(..., description="数据来源标识,对应 SQL 中的 csv_{data} 表名部分;已带 csv_ 前缀时容忍不重复拼接")
     columns: list[str] = Field(
         ...,
-        description="参与展示的列名列表,列数须与 type 约定一致;将转大写后拼入 SELECT",
+        description="参与展示的列名列表,列数须与 type 约定一致;原样加引号拼入 SELECT,须为 /csv/overview 下发的实际列名",
     )
     limit: int = Field(0, ge=0, description="返回数据点数量上限;0 表示不限制(不生成 LIMIT 子句)")
     type: DisplayType = Field(..., description="图表类型,决定列数约束与转换规则")
@@ -107,6 +107,11 @@ def _coerce_value(v: Any) -> Any:
         return float(s)
     except ValueError:
         return v
+
+
+def _quote_identifier(name: str) -> str:
+    """把列名包装为 SQL 引号标识符;内嵌双引号按 SQL 约定转义("→"")。"""
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _validate_columns(type_: str, n: int) -> None:
@@ -192,15 +197,20 @@ async def display(req: DisplayRequest):
     """根据 data / columns / limit / type 拼装 SQL 查询外部 CSV 模块,并按 type
     把行式返回值转换为前端约定的系列式图表数据。
 
-    SQL 形如:`SELECT uppercase{columns} FROM csv_{data} [LIMIT {limit}]`
+    SQL 形如:`SELECT "{col1}", "{col2}" FROM csv_{data} [LIMIT {limit}]`
+    (列名引号原样引用,见表名/列名拼接处注释)。
     转换规则见 `_transform`。
     """
     # ── 1. 校验列数 ──────────────────────────────────────────────────
     _validate_columns(req.type, len(req.columns))
 
     # ── 2. 拼装 SQL ──────────────────────────────────────────────────
-    columns_sql = ", ".join(c.upper() for c in req.columns)
-    sql = f"SELECT {columns_sql} FROM csv_{req.data}"
+    # 列名加引号并保持原样大小写:CSV 模块建表时以引号标识符保留列名原始大小写
+    # (通常为小写),达梦大小写敏感,未加引号的标识符会被折叠为大写而查不到列。
+    columns_sql = ", ".join(_quote_identifier(c) for c in req.columns)
+    # 表名则不加引号(建表时未加引号,达梦中引号形态反而查不到表);容忍 data 已带 csv_ 前缀
+    table = req.data[4:] if req.data.lower().startswith("csv_") else req.data
+    sql = f"SELECT {columns_sql} FROM csv_{table}"
     print(f"[display] SQL: {sql} (limit={req.limit})")
     if req.limit > 0:
         sql += f" LIMIT {req.limit}"
@@ -240,7 +250,8 @@ async def display(req: DisplayRequest):
     rows: list[dict[str, Any]] = upstream.get("data", []) or []
     # 列顺序以请求为准:rows 是按列名索引的 dict,_build_series 经 row.get(key)
     # 取值,点结构完全由 cols 顺序决定,不受上游 columns 返回顺序影响。
-    cols: list[str] = [c.upper() for c in req.columns]
+    # 行的键即请求列名的原样大小写(与拼 SQL 的引号列名一致),不再统一大写。
+    cols: list[str] = list(req.columns)
 
     # ── 5. 行式 → 系列式转换 ───────────────────────────────────────
     result = _transform(req.type, cols, rows)
