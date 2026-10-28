@@ -12,6 +12,7 @@ from app.routers import (
     csv_export,
     display,
     tasks,
+    timeseries_job,
 )
 
 # Create all tables on startup
@@ -63,6 +64,7 @@ app.include_router(analysis_alarm.router)
 app.include_router(analysis_pipeline.router)
 app.include_router(csv_export.router)
 app.include_router(display.router)
+app.include_router(timeseries_job.router)
 
 
 @app.get("/")
