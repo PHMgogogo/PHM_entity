@@ -26,6 +26,25 @@ def _ensure_columns() -> None:
     """
     additions = {
         "tasks": {"model_code": "VARCHAR(255) NOT NULL DEFAULT ''"},
+        "analysis_models": {
+            "name": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "aircraft_number": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "model_code": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "sortie_key": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "sortie_number": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "flight_date": "VARCHAR(50) NOT NULL DEFAULT ''",
+            "source_type": "VARCHAR(50) NOT NULL DEFAULT ''",
+            "data_table_name": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "data_range_start": "VARCHAR(50) NOT NULL DEFAULT ''",
+            "data_range_end": "VARCHAR(50) NOT NULL DEFAULT ''",
+            "data_columns": "TEXT NOT NULL DEFAULT '[]'",
+            "label_columns": "TEXT NOT NULL DEFAULT '[]'",
+            "task_id": "INTEGER",
+            "task_name": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "algorithm_id": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "algorithm_name": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "file_size": "INTEGER NOT NULL DEFAULT 0",
+        },
     }
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
