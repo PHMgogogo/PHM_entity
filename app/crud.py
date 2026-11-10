@@ -52,6 +52,7 @@ def _write_agents_md(work_dir: str) -> None:
 - tools["open-mcps"].list_sorties()：查询当前机号下的架次列表，返回架次号、数据来源、起止时间等；用户问「有哪些架次」时调用。
 - tools["open-mcps"].list_sortie_columns({ parameter_group_id, offset, filter })：分页查询某个架次的列名（参数字段名），parameter_group_id 取自 list_sorties，仅航新架次有该字段。
 - tools["open-mcps"].query_timeseries({ sortie_number, columns, start_time, end_time })：查询某个架次的时序数据并存成 CSV，只返回文件 id；列名取自 list_sortie_columns。
+- tools["open-mcps"].query_aircraft_metric_range({ metric, min_value, max_value, sortie_ids, max_points })：查询当前单机全部或指定架次中某个属性处于数值区间的数据。用户说「所有架次中温度在 20 到 30 之间」时必须调用。工具返回 summary、chart 和 csv_id；前端会自动根据工具输出中的 chart 渲染折线图，你只需简要总结命中架次、区间点数和最值，不要重复输出完整 JSON。
 - tools["open-mcps"].query_job_result({ sample_rows, save_csv })：查询当前会话最近一次训练 / 推理的结果，返回输出列名、每列统计、样本行与说明文字。用户说「查看推理结果 / 查询推理结果 / 训练结果 / 报警情况 / 跑得怎么样」时，必须调用它，标准写法就是这一句：
   const r = await tools["open-mcps"].query_job_result({ sample_rows: 5 }); return r;
   结果还没产生时会返回状态与进度，据此告诉用户是「仍在进行中」还是「尚未执行」，不要臆造数值。
