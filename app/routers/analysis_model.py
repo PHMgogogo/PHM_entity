@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import ANALYSIS_MODELS_DIR
 from app.database import get_db
 from app.models import AnalysisModel
-from app.schemas import AnalysisModelResponse, AnalysisModelUpsert
+from app.schemas import AnalysisModelResponse, AnalysisModelUpdate, AnalysisModelUpsert
 
 router = APIRouter(prefix="/api/analysis/models", tags=["analysis_models"])
 
@@ -61,6 +61,7 @@ def _sanitize_filename(filename: str | None) -> str:
 async def upload_model(
     instance_id: str = Form(..., pattern=r"^[A-Za-z0-9_-]+$"),
     version: str = Form(..., min_length=1, max_length=50),
+    name: str = Form(""),
     description: str = Form(""),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -73,6 +74,7 @@ async def upload_model(
     """
     filename = _sanitize_filename(file.filename)
     db_model = AnalysisModel(
+        name=name.strip() or Path(filename).stem,
         instance_id=instance_id,
         version=version,
         description=description,
@@ -103,6 +105,7 @@ async def upload_model(
         await file.close()
 
     db_model.path = rel_path
+    db_model.file_size = physical_path.stat().st_size
     db.commit()
     db.refresh(db_model)
     return db_model
@@ -127,6 +130,7 @@ def upsert_model(payload: AnalysisModelUpsert, db: Session = Depends(get_db)):
     )
     if db_model is None:
         db_model = AnalysisModel(
+            name=Path(payload.path).stem if payload.path else payload.version,
             instance_id=payload.instance_id,
             version=payload.version,
             description=payload.description,
@@ -134,8 +138,41 @@ def upsert_model(payload: AnalysisModelUpsert, db: Session = Depends(get_db)):
         )
         db.add(db_model)
     else:
+        if not db_model.name:
+            db_model.name = Path(payload.path).stem if payload.path else payload.version
         db_model.description = payload.description
         db_model.path = payload.path
+        db_model.file_size = (
+            _resolve_physical_path(payload.path).stat().st_size
+            if payload.path and _resolve_physical_path(payload.path).is_file()
+            else 0
+        )
+    db.commit()
+    db.refresh(db_model)
+    return db_model
+
+
+@router.put("/{model_id}", response_model=AnalysisModelResponse)
+def update_model_metadata(
+    model_id: int,
+    payload: AnalysisModelUpdate,
+    db: Session = Depends(get_db),
+):
+    """Update editable model metadata such as its display name and note."""
+    db_model = (
+        db.query(AnalysisModel).filter(AnalysisModel.model_id == model_id).first()
+    )
+    if db_model is None:
+        raise HTTPException(
+            status_code=404, detail=f"AnalysisModel with id {model_id} not found"
+        )
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="模型名称不能为空")
+        db_model.name = name
+    if payload.description is not None:
+        db_model.description = payload.description.strip()
     db.commit()
     db.refresh(db_model)
     return db_model
@@ -144,9 +181,24 @@ def upsert_model(payload: AnalysisModelUpsert, db: Session = Depends(get_db)):
 # ── 查询(GET)与删除(DELETE)─────────────────────────────────────────
 
 @router.get("/", response_model=list[AnalysisModelResponse])
-def list_models(db: Session = Depends(get_db)):
-    """返回所有分析模型。"""
-    return db.query(AnalysisModel).all()
+def list_models(
+    aircraft_number: str | None = Query(None),
+    sortie_key: str | None = Query(None),
+    instance_id: str | None = Query(None),
+    model_code: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """List persisted models, optionally scoped to an aircraft/sortie."""
+    query = db.query(AnalysisModel)
+    if aircraft_number:
+        query = query.filter(AnalysisModel.aircraft_number == aircraft_number)
+    if sortie_key:
+        query = query.filter(AnalysisModel.sortie_key == sortie_key)
+    if instance_id:
+        query = query.filter(AnalysisModel.instance_id == instance_id)
+    if model_code:
+        query = query.filter(AnalysisModel.model_code == model_code)
+    return query.order_by(AnalysisModel.time.desc(), AnalysisModel.model_id.desc()).all()
 
 
 @router.get("/{model_id}")

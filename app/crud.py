@@ -35,26 +35,29 @@ def _write_agents_md(work_dir: str) -> None:
     """Write an AGENTS.md guide into the task's working directory (UTF-8)."""
     agents_path = Path(work_dir) / "AGENTS.md"
     agents_path.parent.mkdir(parents=True, exist_ok=True)
-    content = (
-        "如果用户提到了算法，那大概率指的是实例。\n\n"
-        "外部工具都通过 MCP 提供，可用工具如下：\n"
-        "- whoami：查询当前会话（session_id）绑定的任务信息，返回 JSON 字符串，"
-        "包含 task_id、name、description、session_id、aircraft_id、instance_id、"
-        "model_code、work_dir、is_global、algo_cols 等字段。"
-        "需要当前实例的 instance_id 等信息时调用该工具获取。\n"
-        "- ezagent：AI 驱动的 ezcli 命令行工具，把自然语言指令翻译为 ezcli highlevel "
-        "命令并执行，可完成实例的创建（create）、加载模型（load）、训练（train）、"
-        "推理（infer）、状态查询（state）、重启（restart）、删除（delete）等操作。"
-        "只需用自然语言描述需求即可。\n"
-        "【强制要求】运行中的实例不会自动感知算法的变更。只要你修改了当前算法的任何内容"
-        "（例如编辑代码文件、新增或删除文件、重新上传算法、更新算法元数据），"
-        "你都必须立即调用 ezagent 工具，让它执行 restart 重启当前实例（除非训练任务正在进行），"
-        "使变更生效。这是一个必需步骤，不要等到用户要求或询问，也不要省略："
-        "改完算法就重启，然后再向用户报告结果。\n"
-        "- search_knowledge：搜索知识库，同时执行 Dense 向量检索和 BM25 关键词检索，"
-        "通过 RRF 融合排序返回综合最优结果。用户需要知识查询时调用该工具；"
-        "如果查不到，你应该用更模糊的检索词多查询几遍，4遍后跳出。"
-    )
+    content = """如果用户提到了算法，那大概率指的是实例。
+
+【调用规则 · 最重要】下面列出的外部工具都不是可以直接调用的工具：只能在 execute 工具的 code 参数里调用，写法固定为
+
+  const r = await tools["open-mcps"].<工具名>(参数);
+  return r;
+
+例如：const r = await tools["open-mcps"].query_job_result({ sample_rows: 5 }); return r;
+如果把它们当成工具直接发起调用（例如名为 "open-mcps.query_job_result"、"open-mcps.whoami" 或 "query_job_result" 的工具调用），上游会判定为 undeclared tool call，整轮请求立即失败，用户只会看到 invalid_tool_call 报错。execute 里的代码保持最短：一行调用加一行 return 即可，不要 try/catch、不要类型标注、不要多层分支。
+
+可用工具（全部经 execute 调用）：
+- tools["open-mcps"].whoami()：查询当前会话（session_id）绑定的任务信息，返回 JSON 字符串，包含 task_id、name、description、session_id、aircraft_id、instance_id、model_code、work_dir、is_global、algo_cols 等字段。需要当前实例的 instance_id 等信息时调用。
+- tools["open-mcps"].ezagent({ user_input })：AI 驱动的 ezcli 命令行工具，把自然语言指令翻译为 ezcli highlevel 命令并执行，可完成实例的创建（create）、加载模型（load）、训练（train）、推理（infer）、状态查询（state）、重启（restart）、删除（delete）等操作。只需用自然语言描述需求即可。
+- tools["open-mcps"].search_knowledge({ query, top_k }): 搜索知识库，同时执行 Dense 向量检索和 BM25 关键词检索，通过 RRF 融合排序返回综合最优结果。用户需要知识查询时调用；如果查不到，用更模糊的检索词多查几遍，4 遍后跳出。
+- tools["open-mcps"].list_sorties()：查询当前机号下的架次列表，返回架次号、数据来源、起止时间等；用户问「有哪些架次」时调用。
+- tools["open-mcps"].list_sortie_columns({ parameter_group_id, offset, filter })：分页查询某个架次的列名（参数字段名），parameter_group_id 取自 list_sorties，仅航新架次有该字段。
+- tools["open-mcps"].query_timeseries({ sortie_number, columns, start_time, end_time })：查询某个架次的时序数据并存成 CSV，只返回文件 id；列名取自 list_sortie_columns。
+- tools["open-mcps"].query_aircraft_metric_range({ metric, min_value, max_value, sortie_ids, max_points })：查询当前单机全部或指定架次中某个属性处于数值区间的数据。用户说「所有架次中温度在 20 到 30 之间」时必须调用。工具返回 summary、chart 和 csv_id；前端会自动根据工具输出中的 chart 渲染折线图，你只需简要总结命中架次、区间点数和最值，不要重复输出完整 JSON。
+- tools["open-mcps"].query_job_result({ sample_rows, save_csv })：查询当前会话最近一次训练 / 推理的结果，返回输出列名、每列统计、样本行与说明文字。用户说「查看推理结果 / 查询推理结果 / 训练结果 / 报警情况 / 跑得怎么样」时，必须调用它，标准写法就是这一句：
+  const r = await tools["open-mcps"].query_job_result({ sample_rows: 5 }); return r;
+  结果还没产生时会返回状态与进度，据此告诉用户是「仍在进行中」还是「尚未执行」，不要臆造数值。
+【强制要求】运行中的实例不会自动感知算法的变更。只要你修改了当前算法的任何内容（例如编辑代码文件、新增或删除文件、重新上传算法、更新算法元数据），你都必须立即用 execute 调用 ezagent 工具，让它执行 restart 重启当前实例（除非训练任务正在进行），使变更生效。这是一个必需步骤，不要等到用户要求或询问，也不要省略：改完算法就重启，然后再向用户报告结果。
+"""
     agents_path.write_text(content, encoding="utf-8")
 
 
@@ -146,7 +149,7 @@ def update_task(db: Session, task_id: int, task_in: TaskUpdate) -> Task | None:
     db.commit()
     db.refresh(db_task)
     if session_changed and db_task.work_dir:
-        _write_agents_md(db_task.work_dir, db_task.instance_id)
+        _write_agents_md(db_task.work_dir)
     return db_task
 
 

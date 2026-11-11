@@ -79,10 +79,27 @@ class AnalysisModel(Base):
     )
 
     model_id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    name = Column(String(255), nullable=False, default="")
+    aircraft_number = Column(String(255), nullable=False, default="", index=True)
+    model_code = Column(String(255), nullable=False, default="")
+    sortie_key = Column(String(255), nullable=False, default="", index=True)
+    sortie_number = Column(String(255), nullable=False, default="")
+    flight_date = Column(String(50), nullable=False, default="")
+    source_type = Column(String(50), nullable=False, default="")
+    data_table_name = Column(String(255), nullable=False, default="")
+    data_range_start = Column(String(50), nullable=False, default="")
+    data_range_end = Column(String(50), nullable=False, default="")
+    data_columns = Column(JSON, nullable=False, default=list)
+    label_columns = Column(JSON, nullable=False, default=list)
     instance_id = Column(String(255), nullable=False, index=True)
+    task_id = Column(Integer, nullable=True)
+    task_name = Column(String(255), nullable=False, default="")
+    algorithm_id = Column(String(255), nullable=False, default="")
+    algorithm_name = Column(String(255), nullable=False, default="")
     path = Column(Text, nullable=False)
     description = Column(Text, nullable=False, default="")
     version = Column(String(50), nullable=False, default="1.0.0")
+    file_size = Column(Integer, nullable=False, default=0)
     time = Column(DateTime, nullable=False, default=datetime.now)
 
 
@@ -142,4 +159,3 @@ class AnalysisPipeline(Base):
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
     aircraft_id = Column(String(255), nullable=False, index=True)
     pipeline_id = Column(String(255), nullable=False, index=True)
-

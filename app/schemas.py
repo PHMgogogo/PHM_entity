@@ -138,10 +138,27 @@ class AircraftTasksResponse(BaseModel):
 
 
 class AnalysisModel(BaseModel):
+    name: str = ""
+    aircraft_number: str = ""
+    model_code: str = ""
+    sortie_key: str = ""
+    sortie_number: str = ""
+    flight_date: str = ""
+    source_type: str = ""
+    data_table_name: str = ""
+    data_range_start: str = ""
+    data_range_end: str = ""
+    data_columns: list[str] = Field(default_factory=list)
+    label_columns: list[str] = Field(default_factory=list)
     instance_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
+    task_id: int | None = None
+    task_name: str = ""
+    algorithm_id: str = ""
+    algorithm_name: str = ""
     path: str
     description: str = ""
     version: str = "1.0.0"
+    file_size: int = 0
     time: datetime = Field(default_factory=datetime.now)
 
 
@@ -165,13 +182,37 @@ class AnalysisModelResponse(BaseModel):
     """Response schema for an analysis model."""
 
     model_id: int
+    name: str
+    aircraft_number: str
+    model_code: str
+    sortie_key: str
+    sortie_number: str
+    flight_date: str
+    source_type: str
+    data_table_name: str
+    data_range_start: str
+    data_range_end: str
+    data_columns: list[str]
+    label_columns: list[str]
     instance_id: str
+    task_id: int | None
+    task_name: str
+    algorithm_id: str
+    algorithm_name: str
     path: str
     description: str
     version: str
+    file_size: int
     time: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AnalysisModelUpdate(BaseModel):
+    """Editable metadata for a persisted model."""
+
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=2000)
 
 
 class AnalysisResult(BaseModel):

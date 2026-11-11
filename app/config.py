@@ -15,7 +15,9 @@
 CSV_HOST = "http://127.0.0.1:8001"  # 主机:端口
 CSV_SQL_PATH = "/api/csv/sql"  # display: 行式 SQL 查询路由
 CSV_EXPORT_PATH = "/api/csv/export-columns"  # csv_export: 列导出路由
-CSV_TIMESERIES_PATH = "/api/csv/query-timeseries"  # 时序数据统一查询路由
+CSV_TIMESERIES_PATH = "/api/csv/query-timeseries"  # timeseries_job: 按架次取时序数据
+CSV_MAPPINGS_PATH = "/api/aircraft/mappings"  # timeseries_job: 按架次查绑定的 csv_xxx 表
+CSV_OVERVIEW_PATH = "/api/csv/overview"  # timeseries_job: 取该表的列名集合
 
 # ── 算法服务节点(与 CSV 服务不同节点)──────────────────────────────
 ALGO_HOST = "http://127.0.0.1:8001"  # 主机:端口
@@ -26,6 +28,8 @@ ALGO_PATH = ""
 SQL_ENDPOINT = f"{CSV_HOST}{CSV_SQL_PATH}"
 CSV_UPSTREAM = f"{CSV_HOST}{CSV_EXPORT_PATH}"
 CSV_TIMESERIES_ENDPOINT = f"{CSV_HOST}{CSV_TIMESERIES_PATH}"
+CSV_MAPPINGS_ENDPOINT = f"{CSV_HOST}{CSV_MAPPINGS_PATH}"
+CSV_OVERVIEW_ENDPOINT = f"{CSV_HOST}{CSV_OVERVIEW_PATH}"
 ALGO_BASE = f"{ALGO_HOST}{ALGO_PATH}"
 
 # ── 实例服务节点(判定 instance_id 是否存活)───────────────────────
